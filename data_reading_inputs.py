@@ -46,3 +46,6 @@ font = {'family' : 'arial',
         'size'   : 24}
 
 plt.rcParams.update({'font.size': 24})
+
+cyclesdata=5
+ndata_percycle =257
