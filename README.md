@@ -1,4 +1,4 @@
-# LAOS Fitting
+# Fitting of the Oscillatory Rheology Data
 This program fits an oscillatory shear rheology dataset containing small and large amplitudes to the constitutive model developed by Ruud van der Sman. The research paper is available [here](https://doi.org/10.1016/j.foodhyd.2023.109586).  
 
 
