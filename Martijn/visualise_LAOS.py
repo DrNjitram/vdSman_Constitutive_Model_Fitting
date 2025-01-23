@@ -3,6 +3,7 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from collections import namedtuple
 
 from matplotlib.patches import Patch
@@ -18,16 +19,20 @@ Tgs = 384 #K
 debug = False
 All_measurements = dict()
 unique_id = []
-fit_eq = lambda x, *params: params[0] + params[1]*(1-np.exp(-x))
-
+TgT_eq = lambda x, *params: params[0] + params[1] / (1 + np.pow(x / params[2], params[3]))
+linear_eq = lambda x, *params: params[0] + params[1]*x
 # pH correction data
 # 2nd order poly
 base_data = [1.7891, 3.9621, 6.3907]
 acid_data = [4.2209, -5754, 6.4553]
 
-def fit_equation(x_vals, y_vals):
-    params = [0, 1]
-    params, covariance = curve_fit(fit_eq, x_vals, np.log10(y_vals), p0=params)
+def fit_equation(x_vals, y_vals, linear=False):
+    if linear:
+        params = [0, 1]
+        params, covariance = curve_fit(linear_eq, x_vals, np.log10(y_vals), p0=params)
+    else:
+        params = [1500, -2000, 0.5, 9]
+        params, covariance = curve_fit(TgT_eq, x_vals, y_vals, p0=params)
     return params
 
 def TgT(M, T):
@@ -49,8 +54,10 @@ def recalculate_pH(pH):
         A = 10 ** -(14-pH)
     return x2*(A**2)+x1*A+x0
 
+# dirty excel regression
+excel_regr = lambda x: -159.13*x**4 - 44.344*x**3+24.863*x**2 + 13.665*x+6.6294
 
-def get_measurements(path, filenames, measurement_width, header_row, headers, default_pH=7.0, re_calculate_pH=False):
+def get_measurements(path, filenames, measurement_width, header_row, headers, default_pH=7.0, re_calculate_pH=False, mixture=None):
     measurements = []
     for filename in filenames:
         index = 0
@@ -80,36 +87,35 @@ def get_measurements(path, filenames, measurement_width, header_row, headers, de
                         elif bit.endswith("M") or "." in bit:
                             bit = float(re.sub(r"[^0-9.,]", "", bit))
                             if "HCl" in information_string:
-                                pH = bit
-                            elif "NaOH" in information_string:
                                 pH = -1*bit
+                            elif "NaOH" in information_string:
+                                pH = bit
                             elif bit != 0.0:
                                 if bit == 0.752:
-                                    pH = -0.52
+                                    pH = 0.52
                                 elif bit in [0.07, 0.24, 0.41, 0.74]:
-                                    pH = bit
-                                else:
                                     pH = -1*bit
+                                else:
+                                    pH = bit
                             else:
                                 pH = 0.0
 
-                            measurement = measurement._replace(pH=float(pH))
+
+                            measurement = measurement._replace(pH=float(excel_regr(pH*measurement.Moisture)))
+                    if measurement.N3 != 0:
+                        measurement = measurement._replace(pH=measurement.N3)
+                    if measurement.Material == "A8" and measurement.pH == 0.0:
+                        measurement = measurement._replace(pH=float(excel_regr(0)))
+                    if mixture:
+                        measurement = measurement._replace(Material=mixture)
+
+
 
 
                     measurement = measurement._replace(Temperature=float(measurement.Temperature[:-2]))
                     measurement = measurement._replace(Plateau=np.mean(measurement.data["G' [kPa]"][5:10]))
                     measurement = measurement._replace(Plateau_std=np.std(measurement.data["G' [kPa]"][5:10]))
-
-
-                    if "T Run" in filename: # Alpha 8
-                        measurement = measurement._replace(TgT=float(measurement.Material))
-                        measurement = measurement._replace(Moisture=backcalculate_moisture(measurement.TgT, measurement.Temperature))
-                    elif r"pH.xlsx" in filename:
-                        measurement = measurement._replace(pH=recalculate_pH(measurement.Material))
-                        measurement = measurement._replace(Moisture=0.6)
-                        measurement = measurement._replace(TgT=TgT(measurement.Moisture, measurement.Temperature))
-                    else:
-                        measurement = measurement._replace(TgT = TgT(measurement.Moisture, measurement.Temperature))
+                    measurement = measurement._replace(TgT = TgT(measurement.Moisture, measurement.Temperature))
 
                     measurements.append(measurement)
                     print(f"{len(measurements)-1}: {measurement.Plateau:.2f}, {measurement[:-1]}")
@@ -152,7 +158,7 @@ def ArconF_T():
 
     path = rf"{Drive}:\Data\Rheology\CCR\202409 DOE pH T M Arcon F"
     filenames = ["Overview_fixed.xls", "Overview2.xls", "Overview3.xls", "Overview4.xls", ]
-    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, 6.42, True)
+    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, 6.42, True, mixture="Arcon F")
     measurements.pop(11)
 
 
@@ -169,168 +175,6 @@ def ArconF_T():
 
     All_measurements["ArconF"] = measurements
 
-    if debug or True: # To export into JMP
-        print("T (K), M (%), pH, TgT (-), G0 [kPa], log10 G0")
-        for measurement in measurements:
-            print(f"{measurement.Temperature+273.15}, {measurement.Moisture:.2f}, {measurement.pH:.2f}, {measurement.TgT:.2f}, {measurement.Plateau:.2f}, {np.log10(measurement.Plateau):.2f}")
-
-    if debug:
-        plt.figure()
-        X = "Strain %"
-        i = 0
-        for measurement in measurements:
-            if measurement.Moisture == 0.55 and 6.5 < measurement.pH < 7.5:
-                plt.loglog(measurement.data[X], measurement.data["G' [kPa]"], f"{colors[i]}o", label=measurement.Temperature)
-                plt.loglog(measurement.data[X], measurement.data["G'' [kPa]"], f"{colors[i]}s")
-                i += 1
-
-        plt.ylim([10**-2, 10**2])
-        plt.ylabel("G' [kPa] / G'' [kPa]")
-        plt.xlabel(X)
-        plt.legend()
-        plt.title("M55% pH7")
-        plt.show()
-
-    plt.figure()
-
-    graph_measurement(measurements[34])
-
-    graph_measurement(measurements[27])
-
-    fig, ax = plt.subplots()
-    for measurement in measurements:
-        if  6 < measurement.pH < 7 and measurement.Moisture == 0.55:
-            plt.errorbar(measurement.Temperature, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
-    ax.set_yscale("log")
-    plt.ylabel("G0 [kPa] ")
-    plt.xlabel("T [°C]")
-    plt.title("plateau")
-    plt.show()
-
-    fig, ax = plt.subplots()
-    #for measurement in measurements:
-    #    if measurement.Temperature==170.0 and measurement.Moisture == 0.55:
-    #        plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
-    for measurement in measurements:
-        if measurement.Temperature==150.0 and measurement.Moisture == 0.55:
-            plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ro")
-
-    ax.set_yscale("log")
-    plt.ylabel("G0 [kPa] ")
-    plt.xlabel("pH")
-    plt.title("Arcon F pH comparison")
-    #ax.legend(handles=[Patch(facecolor='blue',label='T=170'),Patch(facecolor='red', label='T=150')])
-    plt.show()
-
-    fig, ax = plt.subplots()
-    # for measurement in measurements:
-    #    if measurement.Temperature==170.0 and measurement.Moisture == 0.55:
-    #        plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
-    i = 0
-    for idx in [37, 39, 40, 45]:
-        measurement = measurements[idx]
-        if measurement.Temperature == 150.0 and measurement.Moisture == 0.55 and measurement.pH < 6.5:
-            norm = measurement.Plateau
-            plt.loglog(measurement.data["Strain %"], measurement.data["G' [kPa]"]/norm, f"{colors[i]}o", label=measurement.pH)
-            plt.loglog(measurement.data["Strain %"], measurement.data["G'' [kPa]"]/norm, f"{colors[i]}s")
-            i += 1
-
-    plt.ylim([10**-3, 1])
-    plt.xlim([10**0, 10**2.5])
-    plt.ylabel("normalised G' [kPa] ")
-    plt.xlabel("Strain %")
-    plt.title("Arcon F pH comparison 2")
-    plt.legend()
-    # ax.legend(handles=[Patch(facecolor='blue',label='T=170'),Patch(facecolor='red', label='T=150')])
-    plt.show()
-
-def Alpha8_T():
-    measurement_width = 22
-    header_row = 18
-    headers = ['Strain %', "S' [dNm]", "S'' [dNm]", 'S* [dNm]', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta', 'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]', 'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'J\' [1/kPa]', 'J" [1/kPa]','J* [1/kPa]', 'I2 abs.', 'I3 abs.', 'I2/I1 [%]', 'I3/I1 [%]', 'Shear Stress [Pa]']
-    path = rf"{Drive}:\Data\Rheology\CCR\2023-05-19 pH and T run\T"
-    filenames = ["T Run.xls"]
-    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, 7.0)
-    All_measurements["Alpha8_T"] = measurements
-
-    measurement = measurements[0]
-    plt.loglog(measurement.data["Strain %"], measurement.data["G' [kPa]"], f"{colors[0]}o", label="G'")
-    plt.loglog(measurement.data["Strain %"], measurement.data["G'' [kPa]"], f"{colors[0]}s", label="G\"")
-    plt.ylabel("G' [kPa]/G\" [kPa] ")
-    plt.xlabel("Strain %")
-    plt.legend()
-    plt.title(
-        f"T{measurement.Temperature}°C, M{measurement.Moisture * 100:.0f}%, pH{measurement.pH:.2f}")
-    plt.show()
-
-    plt.figure()
-    X = "Strain %"
-    for i, idx in enumerate(range(len(measurements))):
-        measurement = measurements[idx - 1]
-        plt.loglog(measurement.data[X], measurement.data["G' [kPa]"], f"{colors[i]}o", label=measurement.Material)
-        plt.loglog(measurement.data[X], measurement.data["G'' [kPa]"], f"{colors[i]}s")
-
-
-    plt.ylabel("G' [kPa] / G'' [kPa]")
-    plt.xlabel(X)
-    plt.title("Alpha 8 T")
-    plt.legend()
-    plt.show()
-
-def old_Alpha8_pH():
-    measurement_width = 22
-    header_row = 18
-    headers = ['Strain %', "S' [dNm]", "S'' [dNm]", 'S* [dNm]', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta', 'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]', 'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'J\' [1/kPa]', 'J" [1/kPa]','J* [1/kPa]', 'I2 abs.', 'I3 abs.', 'I2/I1 [%]', 'I3/I1 [%]', 'Shear Stress [Pa]']
-    path = rf"{Drive}:\Data\Rheology\CCR\2023-05-19 pH and T run\pH"
-    filenames = ["pH.xlsx"]
-    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, True)
-
-    All_measurements["Alpha8_pH"] = measurements
-
-    for measurement in measurements:
-        plt.semilogy(float(measurement.pH), measurement.Plateau, f"ko")
-
-    plt.title("Alpha 8 pH")
-    plt.ylabel("plateau G' [kPa] ")
-    plt.xlabel("pH")
-    plt.show()
-
-def TgT_comparison():
-    fig, ax = plt.subplots()
-    x_indices = np.linspace(0.35, 0.55, 20)
-
-    x_vals = []
-    y_vals = []
-    for measurement in All_measurements["Alpha8"]:
-        if measurement and measurement.pH == 0.0:
-            x_vals.append(measurement.TgT)
-            y_vals.append(measurement.Plateau)
-            plt.errorbar(float(measurement.TgT), measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
-
-    params = fit_equation(x_vals, y_vals)
-    points = fit_eq(x_indices, *params)
-    plt.plot(x_indices, 10**points, "k--", label="fit", zorder=10)
-
-    x_vals = []
-    y_vals = []
-    for measurement in All_measurements["ArconF"]:
-        if 6 < measurement.pH < 7:
-            x_vals.append(measurement.TgT)
-            y_vals.append(measurement.Plateau)
-            plt.errorbar(float(measurement.TgT), measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
-
-    params = fit_equation(x_vals, y_vals)
-    points = fit_eq(x_indices, *params)
-    plt.plot(x_indices, 10**points, "b--", label="fit", zorder=10)
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    plt.ylabel("plateau G' [kPa] ")
-    plt.xlabel("Tg/T [-]")
-    ax.legend(handles=[Patch(facecolor='black',
-                             label='Alpha 8'),
-                       Patch(facecolor='blue', label='Arcon F')])
-    plt.title("TgT")
-    plt.show()
 
 def new_Alpha8():
     measurement_width = 12
@@ -338,74 +182,192 @@ def new_Alpha8():
     headers = ['Strain %', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta', 'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]', 'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'Shear Stress [Pa]']
     path = rf"{Drive}:\Data\Rheology\CCR\202411 DoE pH T M Alph 8"
     filenames = ["Overview 1.xls", "Overview 2.xls", "Overview 3.xls", "Overview 4.xls"]
-    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, default_pH=0)
+    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, default_pH=0, mixture="Alpha 8")
     measurements[7] = False
     measurements[17] = False
     measurements[25] = False
     All_measurements["Alpha8"] = measurements
 
+
+
+def JMP_export():
+    header_string = "ID, Material, T (K), M (%), pH, TgT (-), G0 [kPa]"
+    print_measurement = lambda m: print(f"{m.Batch_NB} {m.Material}, {m.Temperature + 273.15}, {m.Moisture:.2f}, {m.pH:.2f}, {m.TgT:.2f}, {m.Plateau:.2f}")
+
+    print(header_string)
+    for measurement in All_measurements["ArconF"]:
+       print_measurement(measurement)
+
+
+    for measurement in All_measurements["Alpha8"]:
+        if measurement:
+            print_measurement(measurement)
+
+
+
+def TgT_comparison():
+    x_indices = np.linspace(0.38, 0.55, 20)
+
+    x_vals = []
+    y_vals = []
     fig, ax = plt.subplots()
-    for measurement in measurements:
-        if  measurement and measurement.pH == 0.0:
-            plt.errorbar(float(measurement.TgT), measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
+    for measurement in All_measurements["Alpha8"]:
+        if measurement and 6 < measurement.pH < 7:
+            x_vals.append(measurement.TgT)
+            y_vals.append(measurement.Plateau)
+            plt.errorbar(measurement.TgT, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ks")
+
+    # params = fit_equation(x_vals, y_vals, True)
+    # points = linear_eq(x_indices, *params)
+    # plt.plot(x_indices, 10 ** points, "k--", label="fit", zorder=10)
+    ax.set_yscale("log")
+
+
+
+    x_vals = []
+    y_vals = []
+    for measurement in All_measurements["ArconF"]:
+        if 6 < measurement.pH < 7:
+            x_vals.append(measurement.TgT)
+            y_vals.append(measurement.Plateau)
+            plt.errorbar(measurement.TgT, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
+
+    # params = fit_equation(x_vals, y_vals, True)
+    # points = linear_eq(x_indices, *params)
+    # plt.plot(x_indices, 10**points, "b--", label="fit", zorder=10)
 
     ax.set_yscale("log")
-    plt.title("Alpha 8")
-    plt.ylabel("plateau G' [kPa] ")
-    plt.xlabel("Tg/T")
+
+    plt.ylabel("G0 [kPa]")
+    plt.xlabel("Tg/T [-]")
+    ax.legend(handles=[Patch(facecolor='black',
+                             label='Alpha 8'),
+                       Patch(facecolor='blue', label='Arcon F')])
+    plt.title("TgT")
+    plt.ylim([1e0, 1e3])
     plt.show()
 
-    fig, ax = plt.subplots()
-    for i, measurement in enumerate(measurements):
-        if measurement and measurement.Temperature == 150.0 and measurement.Moisture ==0.55:
-            print(i, measurement[:-1])
-            plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
 
-    ax.set_yscale("log")
-    plt.title("Alpha 8")
-    plt.ylabel("plateau G' [kPa] ")
-    plt.xlabel("pH")
-    plt.show()
+
+
 
 def pH_comparison():
-    measurements = All_measurements["ArconF"]
-    fig, ax = plt.subplots()
+
+    fig, ax1 = plt.subplots(1, 1)
     # for measurement in measurements:
     #    if measurement.Temperature==170.0 and measurement.Moisture == 0.55:
     #        plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
-    for measurement in measurements:
+    for measurement in All_measurements["ArconF"]:
         if measurement.Temperature == 150.0 and measurement.Moisture == 0.55:
-            plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ro")
+            ax1.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
 
-    ax.set_yscale("log")
-    plt.ylabel("G0 [kPa] ")
-    plt.xlabel("pH")
-    plt.title("Arcon F pH")
+    ax1.set_yscale("log")
+    ax1.set_ylabel("G0 [kPa]")
+    ax1.set_xlabel("pH")
 
-    measurements = All_measurements["Alpha8"]
-    fig, ax = plt.subplots()
-    for i, measurement in enumerate(measurements):
+
+    for i, measurement in enumerate(All_measurements["Alpha8"]):
         if measurement and measurement.Temperature == 150.0 and measurement.Moisture == 0.55:
             print(i, measurement[:-1])
-            plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
+            ax1.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
 
-    ax.set_yscale("log")
-    plt.title("Alpha 8")
-    plt.ylabel("plateau G' [kPa] ")
-    plt.xlabel("Alpha 8 pH")
+
+    ax1.set_title("pH comparison")
+    ax1.legend(handles=[Patch(facecolor='black',label='Alpha 8'),Patch(facecolor='blue', label='Arcon F')])
+    plt.ylim([4e0, 3e1])
     plt.show()
 
 
+def Plateau_comparison():
+    x_indices = np.linspace(90, 170, 20)
+
+    x_vals = []
+    y_vals = []
+
+    fig, ax = plt.subplots()
+    for measurement in All_measurements["ArconF"]:
+        if 6 < measurement.pH < 7 and measurement.Moisture == 0.55:
+            x_vals.append(measurement.Temperature)
+            y_vals.append(measurement.Plateau)
+            plt.errorbar(measurement.Temperature, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
+    #params = fit_equation(x_vals, y_vals, True)
+    #points = linear_eq(x_indices, *params)
+    #plt.plot(x_indices, 10**points, "b--", label="fit", zorder=10)
 
 
+    x_vals = []
+    y_vals = []
+    for measurement in All_measurements["Alpha8"]:
+        if measurement and 6 < measurement.pH < 7  and measurement.Moisture == 0.55:
+            x_vals.append(measurement.Temperature)
+            y_vals.append(measurement.Plateau)
+            plt.errorbar(measurement.Temperature, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
+    #params = fit_equation(x_vals, y_vals, True)
+    #points = linear_eq(x_indices, *params)
+    #plt.plot(x_indices, 10**points, "k--", label="fit", zorder=10)
+    ax.legend(handles=[Patch(facecolor='black',
+                             label='Alpha 8'),
+                       Patch(facecolor='blue', label='Arcon F')])
+    ax.set_yscale("log")
+
+
+    plt.ylabel("G0 [kPa] ")
+    plt.xlabel("T [°C]")
+    plt.title("plateau")
+    plt.show()
+
+def tan_delta_master():
+    # fig, ax = plt.subplots()
+    # for measurement in All_measurements["Alpha8"]:
+    #     if measurement and 6 < measurement.pH < 7  and measurement.Moisture == 0.55:
+    #         plt.errorbar(measurement.Temperature, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"ko")
+    #
+    # ax.set_yscale("log")
+    # plt.ylabel("G0 [kPa] ")
+    # plt.xlabel("T [°C]")
+    # plt.title("plateau")
+    # plt.show()
+    #
+    # plt.figure()
+    fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, layout="constrained")
+    for measurement in All_measurements["Alpha8"]:
+        if measurement and 6 < measurement.pH < 7  and measurement.Moisture == 0.55:
+            ax1.loglog(measurement.data["Strain %"], measurement.data["G* [kPa]"], c=plt.cm.viridis((measurement.Temperature-80)/90), label=measurement.Info)
+    # for measurement in All_measurements["Alpha8"]:
+    #     if measurement and 6 < measurement.pH < 7  and measurement.Moisture == 0.55:
+    #         ax1.loglog(measurement.data["Strain %"], measurement.data["G' [kPa]"]/measurement.Plateau,
+    #                    c=plt.cm.viridis((measurement.Temperature-80)/90), label=measurement.Info)
+    #         ax1.loglog(measurement.data["Strain %"], measurement.data["G'' [kPa]"] / measurement.Plateau,
+    #                    c=plt.cm.viridis((measurement.Temperature - 80) / 90), label=measurement.Info)
+    #
+    for measurement in All_measurements["ArconF"]:
+        if measurement and 6 < measurement.pH < 7  and measurement.Moisture == 0.55:
+                ax2.loglog(measurement.data["Strain %"], measurement.data["G* [kPa]"], c=plt.cm.viridis((measurement.Temperature-80)/90), label=measurement.Info)
+    # for measurement in All_measurements["ArconF"]:
+    #     if measurement and 6 < measurement.pH < 7  and measurement.Moisture == 0.55:
+    #         ax2.loglog(measurement.data["Strain %"], measurement.data["G' [kPa]"]/measurement.Plateau,
+    #                    c=plt.cm.viridis((measurement.Temperature-80)/90), label=measurement.Info)
+    #         ax2.loglog(measurement.data["Strain %"], measurement.data["G'' [kPa]"] / measurement.Plateau,
+    #                    c=plt.cm.viridis((measurement.Temperature - 80) / 90), label=measurement.Info)
+    fig.colorbar(mpl.cm.ScalarMappable(norm=mpl.colors.Normalize(vmin=80, vmax=170), cmap=plt.cm.viridis),
+                 ax=ax2, orientation='vertical', label='T (°)')
+
+    ax1.set_title("Alpha 8")
+    ax2.set_title("Arcon F")
+    #ax1.set_ylabel("G'/G0 G\"/G0[kPa]")
+    ax1.set_ylabel("G* [kPa]")
+    ax1.set_xlabel("strain [%]")
+    ax2.set_xlabel("strain [%]")
+    ax1.set_ylim(1e-1, 5e2)
+    plt.show()
 
 print(Measurement._fields)
-Drive = "W"
+Drive = "D"
 ArconF_T()
-#Alpha8_T()
-#old_Alpha8_pH()
-
 new_Alpha8()
-pH_comparison()
-TgT_comparison()
+#pH_comparison()
+#TgT_comparison()
+#Plateau_comparison()
+JMP_export()
+tan_delta_master()
 

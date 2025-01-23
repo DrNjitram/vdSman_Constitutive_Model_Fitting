@@ -1,3 +1,4 @@
+from collections import namedtuple
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -87,6 +88,41 @@ def read_data1(n_header, n_rows, header_list, what_to_collect_time, path_read, s
 
     return data
 
+
+
+def read_data_CCR(n_header, header_list, what_to_collect, path_read, cols_btw_data):
+    index = 0
+    measurements = []
+    Info = namedtuple("Measurement",
+                             "Mixture, Customer, Instrument, Material, Comments, Info, Batch_NB, Order_NB, N3, N4, N5, Frequency, Temperature, InterID")
+    infos = []
+    while True:
+        try:
+            measurement = []
+            info = pd.read_excel(io=path_read, header=None, skiprows=1, nrows=14,
+                                 usecols=[(1 if not index else 0) + index * cols_btw_data], names=["Value"])
+            data = pd.read_excel(io=path_read, header=None, names=header_list, skiprows=n_header,
+                                 usecols=list(range(index * cols_btw_data, (index + 1) * cols_btw_data)))
+
+            for header in what_to_collect:
+                if header == "index":
+                    measurement.append(np.arange(len(data["Strain %"])))
+                else:
+                    measurement.append(np.array(data[header]))
+
+            measurements.append(measurement)
+            infos.append(Info(*info["Value"]))
+
+            index += 1
+        except Exception as e:
+            if not measurements:
+                print(e)
+                raise e
+            break
+
+
+    return infos, measurements
+
 # ───────────────────────────────────────────────────────────────────
 #   HB fitting for HB informed fitting
 # ───────────────────────────────────────────────────────────────────    
@@ -114,8 +150,8 @@ def extract_steady_from_laos(data_exp_avg,nelements_cycle, col_index_shearrate, 
 
     for k in range(0,len(data_exp_avg)):
 
-        x = data_exp_avg[k][col_index_shearrate][-nelements_cycle:] #shear rate
-        y = data_exp_avg[k][col_index_stress][-nelements_cycle:] #shear stress
+        x = data_exp_avg[k][col_index_shearrate][-nelements_cycle:] #shear rate [1/s] -Martijn: Strain rate gamma dot [1/s]
+        y = data_exp_avg[k][col_index_stress][-nelements_cycle:] #shear stress [Pa] -Martijn: Stress Sigma [Pa]
 
         #extract the positive values of both sher stress and shearrate
         xpos = []
