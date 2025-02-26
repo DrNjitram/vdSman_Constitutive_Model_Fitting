@@ -1,0 +1,15 @@
+Term	Tau	n	γ dot cr	log G0
+Intercept	358.86468	1.1555934	9.8056934	1.7506596
+Centered T	112.58493	0.1264908	9.2307556	-0.582605
+Centered Moisture	57.328554	0.0371807	3.1354359	-0.239574
+(Centered T+0,10484)*(Centered Moisture+0,016)	114.51964	0.0217861	3.0151726	-0.081242
+Centered pH	66.653855	0.0751576	1.3865277	-0.118345
+(Centered T+0,10484)*(Centered T+0,10484)	59.103802	0.0138383	1.3000698	-0.079644
+(Centered pH-0,04415)*(Centered pH-0,04415)	-139.3387	-0.036701	-2.09754	-0.055808
+Intercept	1.27	20.69	0.75	39.43
+Centered T	0.65	3.7	1.15	-21.47
+Centered Moisture	0.29	0.95	0.34	-7.72
+(Centered T+0,10484)*(Centered Moisture+0,016)	0.7	0.67	0.4	-3.16
+Centered pH	0.4	2.28	0.18	-4.52
+(Centered T+0,10484)*(Centered T+0,10484)	0.32	0.38	0.15	-2.72
+(Centered pH-0,04415)*(Centered pH-0,04415)	-1.12	-1.48	-0.36	-2.84

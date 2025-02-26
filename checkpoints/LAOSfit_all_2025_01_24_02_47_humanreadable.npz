@@ -1,0 +1,6 @@
+error_allfitting_perc = []
+objfuncval_nonlin_array = [np.float64(334.93726956008305)]
+opt_par_all = [np.float64(1000.0), np.float64(0.45000000000000007),
+np.float64(0.45000000000000007), np.float64(3.1622776601683795),
+np.float64(0.31622776601683794)]
+opt_par_nonlin = array([0.5, 0.5, 0.5, 0.5, 0.5])

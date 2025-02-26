@@ -1,5 +1,7 @@
 import os
 import re
+from typing import List
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -9,7 +11,7 @@ from collections import namedtuple
 from matplotlib.patches import Patch
 from scipy.optimize import curve_fit
 
-Measurement = namedtuple("Measurement", "Mixture, Customer, Instrument, Material, Comments, Info, Batch_NB, Order_NB, N3, N4, N5, Frequency, Temperature, InterID, Moisture, pH, TgT, Plateau, Plateau_std, data")
+Measurement = namedtuple("Measurement", "Mixture, Customer, Instrument, Material, Comments, Info, Batch_NB, Order_NB, N3, N4, N5, Frequency, Temperature, InterID, Moisture, pH, TgT, Plateau, Plateau_std, tan_delta, data")
 #path = r"D:\Data\Rheology\CCR\202409 DOE pH T M Arcon F\Overview.xlsx"
 colors = ["k", "r", "g", "b", "m", "c", "y", "k", "k", "k", "k", "k", "k"]
 Cpw = 1.92E+03
@@ -57,7 +59,7 @@ def recalculate_pH(pH):
 # dirty excel regression
 excel_regr = lambda x: -159.13*x**4 - 44.344*x**3+24.863*x**2 + 13.665*x+6.6294
 
-def get_measurements(path, filenames, measurement_width, header_row, headers, default_pH=7.0, re_calculate_pH=False, mixture=None):
+def get_measurements(path, filenames, measurement_width, header_row, headers, default_pH=7.0, re_calculate_pH=False, mixture=None) -> List[Measurement]:
     measurements = []
     for filename in filenames:
         index = 0
@@ -67,7 +69,7 @@ def get_measurements(path, filenames, measurement_width, header_row, headers, de
             try:
                 info = pd.read_excel(io=file_path, header=None, skiprows=1, nrows=14, usecols=[(1 if not index else 0)+index*measurement_width], names=["Value"])
                 data = pd.read_excel(io=file_path, header=None, names=headers, skiprows=header_row, usecols=list(range(index * measurement_width, (index+1)*measurement_width)))
-                measurement = Measurement(*info["Value"], -1, default_pH, -1, -1, -1, data)
+                measurement = Measurement(*info["Value"], -1, default_pH, -1, -1, -1, -1, data)
                 if measurement.InterID not in unique_id:
                     unique_id.append(measurement.InterID)
                     information_string = f"{measurement.Material} {measurement.Info} {measurement.Comments}"
@@ -93,7 +95,7 @@ def get_measurements(path, filenames, measurement_width, header_row, headers, de
                             elif bit != 0.0:
                                 if bit == 0.752:
                                     pH = 0.52
-                                elif bit in [0.07, 0.24, 0.41, 0.74]:
+                                elif bit in [0.07, 0.24, 0.41, 0.74, 0.3]:
                                     pH = -1*bit
                                 else:
                                     pH = bit
@@ -116,6 +118,7 @@ def get_measurements(path, filenames, measurement_width, header_row, headers, de
                     measurement = measurement._replace(Plateau=np.mean(measurement.data["G' [kPa]"][5:10]))
                     measurement = measurement._replace(Plateau_std=np.std(measurement.data["G' [kPa]"][5:10]))
                     measurement = measurement._replace(TgT = TgT(measurement.Moisture, measurement.Temperature))
+                    measurement = measurement._replace(tan_delta=np.mean(measurement.data["Tan Delta"][5:10]/measurement.Plateau))
 
                     measurements.append(measurement)
                     print(f"{len(measurements)-1}: {measurement.Plateau:.2f}, {measurement[:-1]}")
@@ -149,29 +152,50 @@ def graph_measurement(measurement):
 
 
 def ArconF_T():
-    measurement_width = 19
     header_row = 18
-    headers = ['Strain %', "S' [dNm]", "S'' [dNm]", 'S* [dNm]', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta',
-               'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]',
-               'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'I2 abs.', 'I3 abs.', 'I2/I1 [%]', 'I3/I1 [%]',
-               'Shear Stress [Pa]']
 
-    path = rf"{Drive}:\Data\Rheology\CCR\202409 DOE pH T M Arcon F"
-    filenames = ["Overview_fixed.xls", "Overview2.xls", "Overview3.xls", "Overview4.xls", ]
-    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, 6.42, True, mixture="Arcon F")
-    measurements.pop(11)
-
-
-    measurement_width = 12
     headers = ['Strain %', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta',
                'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]',
                'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'Shear Stress [Pa]']
-    measurements2 = get_measurements(path, ["Overview5.xlsx", "Overview6.xlsx"], measurement_width, header_row, headers, 6.42, False)
-    measured_pH = [4.80, 5.01, 5.87, 6.02, 4.78, 5.61, 5.22, 5.17, 5.60, 6.31, 6.46, 6.45, 6.42, 6.85 ,8.62, 9, 5.03, 6.26]
-    for measurement, pH in zip(measurements2[1:], measured_pH[1:]): # First one is busted
-        #print(f"{pH}, {measurement.Comments}, {measurement.Info}, {measurement.Temperature}")
-        measurement = measurement._replace(pH=pH)
-        measurements.append(measurement)
+
+    path = rf"{Drive}:\Data\Rheology\CCR\202409 DOE pH T M Arcon F\Redo"
+    filenames = [f"Block_{i}.xls" for i in range(1,6)]
+    measurements = get_measurements(path, filenames, len(headers), header_row, headers, 6.42, True, mixture="Arcon F")
+
+
+
+    # headers = ['Strain %', "S' [dNm]", "S'' [dNm]", 'S* [dNm]', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta',
+    #            'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]',
+    #            'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'I2 abs.', 'I3 abs.', 'I2/I1 [%]', 'I3/I1 [%]',
+    #            'Shear Stress [Pa]']
+    #
+    # path = rf"{Drive}:\Data\Rheology\CCR\202409 DOE pH T M Arcon F"
+    # filenames = ["Overview_fixed.xls", "Overview2.xls", "Overview3.xls", "Overview4.xls", ]
+    # measurements = get_measurements(path, filenames, len(headers), header_row, headers, 6.42, True, mixture="Arcon F")
+    #
+    #
+    # measurement_width = 12
+    # headers = ['Strain %', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta',
+    #            'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]',
+    #            'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', 'Shear Stress [Pa]']
+    # measurements2 = get_measurements(path, ["Overview5.xlsx", "Overview6.xlsx"], measurement_width, header_row, headers, 6.42, False)
+    #
+    # for measurement, pH in zip(measurements2[1:], measured_pH[1:]): # First one is busted
+    #     #print(f"{pH}, {measurement.Comments}, {measurement.Info}, {measurement.Temperature}")
+    #     measurement = measurement._replace(pH=pH)
+    #     measurements.append(measurement)
+
+    pH_InterIDs = [23627, 23630, 23633, 23636, 23639, 23642, 23645, 23648, 23651, 23654, 23657, 23660, 23663, 23666,
+                   23669, 23672, 23675, 23678]
+    measured_pH = [4.80, 5.01, 5.87, 6.02, 4.78, 5.61, 5.22, 5.17, 5.60, 6.31, 6.46, 6.45, 6.42, 6.85, 8.62, 9.51, 5.03,
+                   6.26]
+    for i, measurement in enumerate(measurements):
+        if measurement.InterID == 23462:
+            measurements[i] = False
+        if measurement.InterID in pH_InterIDs:
+            measurements[i] = measurement._replace(pH=measured_pH[pH_InterIDs.index(measurement.InterID)])
+
+
 
     All_measurements["ArconF"] = measurements
 
@@ -188,20 +212,38 @@ def new_Alpha8():
     measurements[25] = False
     All_measurements["Alpha8"] = measurements
 
+    measurement_width = 22
+    header_row = 18
+    headers = ['Strain %', "S' [dNm]", "S'' [dNm]", 'S* [dNm]', "G' [kPa]", "G'' [kPa]", 'G* [kPa]', 'Tan Delta',
+               'Temperature [°C]', 'Pressure [bar]', "Viscosity n' [Pa*s]", 'Viscosity n" [Pa*s]',
+               'Viscosity n* [Pa*s]', 'Shear Rate [1/sec]', "J' [1/kPa]", "J'' [1/kPa]", "	J* [1/kPa]"
+, 'I2 abs.', 'I3 abs.', 'I2/I1 [%]', 'I3/I1 [%]',
+               'Shear Stress [Pa]']
+
+    filenames = ["Overview 5.xls"]
+    measurements = get_measurements(path, filenames, measurement_width, header_row, headers, 6.42, True,
+                                    mixture="Alpha 8")
+    All_measurements["Alpha8"] =  All_measurements["Alpha8"]+ measurements
 
 
 def JMP_export():
-    header_string = "ID, Material, T (K), M (%), pH, TgT (-), G0 [kPa]"
-    print_measurement = lambda m: print(f"{m.Batch_NB} {m.Material}, {m.Temperature + 273.15}, {m.Moisture:.2f}, {m.pH:.2f}, {m.TgT:.2f}, {m.Plateau:.2f}")
+    header_string = "ID, Material, T (K), M (%), pH, TgT (-), G0 [kPa], tan(δ)"
+    print_measurement = lambda m: print(f"{m.InterID}, {m.Material}, {m.Temperature + 273.15}, {m.Moisture:.2f}, {m.pH:.2f}, {m.TgT:.2f}, {m.Plateau:.2f}, {m.tan_delta:.4f}")
 
     print(header_string)
-    for measurement in All_measurements["ArconF"]:
-       print_measurement(measurement)
+    if "ArconF" in All_measurements:
+        for measurement in All_measurements["ArconF"]:
+            if measurement:
+                print_measurement(measurement)
+            else:
+                print("nan")
 
-
-    for measurement in All_measurements["Alpha8"]:
-        if measurement:
-            print_measurement(measurement)
+    if "Alpha8" in All_measurements:
+        for i, measurement in enumerate(All_measurements["Alpha8"]):
+            if measurement:
+                print_measurement(measurement)
+            else:
+                print("nan")
 
 
 
@@ -210,7 +252,7 @@ def TgT_comparison():
 
     x_vals = []
     y_vals = []
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(dpi=600)
     for measurement in All_measurements["Alpha8"]:
         if measurement and 6 < measurement.pH < 7:
             x_vals.append(measurement.TgT)
@@ -253,12 +295,12 @@ def TgT_comparison():
 
 def pH_comparison():
 
-    fig, ax1 = plt.subplots(1, 1)
+    fig, ax1 = plt.subplots(1, 1, dpi=600)
     # for measurement in measurements:
     #    if measurement.Temperature==170.0 and measurement.Moisture == 0.55:
     #        plt.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
     for measurement in All_measurements["ArconF"]:
-        if measurement.Temperature == 150.0 and measurement.Moisture == 0.55:
+        if measurement.Temperature == 150.0 and measurement.Moisture == 0.55 and not 6.3 < measurement.pH <6.6:
             ax1.errorbar(measurement.pH, measurement.Plateau, yerr=measurement.Plateau_std, fmt=f"bo")
 
     ax1.set_yscale("log")
@@ -364,10 +406,10 @@ def tan_delta_master():
 print(Measurement._fields)
 Drive = "D"
 ArconF_T()
-new_Alpha8()
+#new_Alpha8()
 #pH_comparison()
 #TgT_comparison()
 #Plateau_comparison()
 JMP_export()
-tan_delta_master()
+#tan_delta_master()
 
